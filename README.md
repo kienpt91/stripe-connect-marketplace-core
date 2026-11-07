@@ -165,7 +165,7 @@ Also run: release script tests (29 checks), secret scan on the tree and the full
 - **The money rules are this repository's rules**, not Stripe's: how a refund splits the platform's fee from the seller's share, that a lost dispute is charged to the seller in the ledger while the platform pays at Stripe until an operator reverses the transfer, and that when a charge in dispute was also refunded the platform bears the part of a lost dispute that the refund had already taken from the seller (`platform_fees` then goes below zero; ADR 0003). Stripe's own processing fees, dispute fees, taxes and appeals are not modelled (SECURITY.md).
 - PostgreSQL 16.14 and Node 24.14.1 only. The CI workflows were written but have not been run on GitHub (they are modelled on the sibling repositories, whose workflows have).
 - Supabase and its connection pooler were not used in any test; `docs/adapting.md` says what to check.
-- Nine currencies are known; any other is refused. No conversion between currencies.
+- Nine currencies are known; any other is refused. No conversion between currencies. The fee policy is one for all of them and not currency-aware: `FEE_FIXED_MINOR=30` and `MIN_CHARGE_MINOR=100` are 0.30 and 1.00 in USD but 30 and 100 whole yen in JPY (`docs/adapting.md`; `test/contract/checkout.scenarios.ts` records it for JPY).
 - No load test; the lock per charge serialises one charge's events, not the system's.
 
 ## Dependencies

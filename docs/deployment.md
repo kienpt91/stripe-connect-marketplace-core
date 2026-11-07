@@ -30,8 +30,8 @@ Run `npm run migrate` (`DATABASE_ADMIN_URL`) before each deploy, from one place.
 | `WEBHOOK_SECRETS` | yes | comma-separated signing secrets, newest first; each at least 24 characters without spaces. Give the account endpoint and the Connect endpoint a secret each and list both. `reconcile` requires it too |
 | `APP_ORIGIN` | yes | the one `https` origin people are sent back to (plain http for localhost only); no path |
 | `FEE_PERCENT_BPS` | no | default 1000 (10 %), 0 to 10000 |
-| `FEE_FIXED_MINOR` | no | default 30, 0 to 99999999 |
-| `MIN_CHARGE_MINOR` | no | default 100, 1 to 99999999 |
+| `FEE_FIXED_MINOR` | no | default 30, 0 to 99999999; minor units of whichever currency the charge is in, not currency-aware: 30 is 0.30 USD but 30 yen |
+| `MIN_CHARGE_MINOR` | no | default 100, 1 to 99999999; the same: 100 is 1.00 USD but 100 yen |
 | `STRIPE_API_VERSION` | no | sent as `Stripe-Version` when set; empty means unset |
 | `HOST`, `PORT` | no | default `127.0.0.1`, 8080 |
 | `WEBHOOK_MAX_BODY_BYTES` | no | default 65536, 1024 to 1048576 |

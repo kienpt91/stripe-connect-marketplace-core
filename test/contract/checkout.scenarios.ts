@@ -3,7 +3,7 @@ import { startCheckout, type CheckoutError } from "../../src/application/checkou
 import { GatewayError } from "../../src/application/ports.js";
 import { registerSeller } from "../../src/application/sellers.js";
 import { checkoutRequest, deliverAll, enabledSeller, sale, sellerUuid, sessionOf } from "../support/world.js";
-import { operator, orderOf, sharedDb, system, type DbFactory } from "./support.js";
+import { accountsOf, operator, orderOf, sharedDb, system, type DbFactory } from "./support.js";
 
 export function checkoutScenarios(open: DbFactory): void {
   describe("checkout with a destination charge", () => {
@@ -38,6 +38,25 @@ export function checkoutScenarios(open: DbFactory): void {
         const input = call.input as { amount: number; applicationFee: number };
         expect(Number.isSafeInteger(input.amount) && Number.isSafeInteger(input.applicationFee)).toBe(true);
       }
+    });
+
+    it("applies one fee policy in the minor unit of whichever currency is charged: the fixed fee and the minimum are not currency-aware", async () => {
+      const w = world();
+      const seller = await enabledSeller(w);
+      const outcome = async (amount: number, currency: string) => {
+        const result = await startCheckout(w.deps, checkoutRequest(seller, amount, { currency }));
+        return result.ok ? result.value.fee : result.error;
+      };
+      // 10 %, 30 and 100 minor units: 0.30 and 1.00 where a currency has cents, but 30 and 100 whole yen where it has none
+      expect(await outcome(1_000, "usd")).toBe(130); // 1.30 of 10.00 USD
+      expect(await outcome(1_000, "jpy")).toBe(130); // 130 of 1,000 JPY: the same number, a different amount of money
+      expect(await outcome(99, "usd")).toBe("amount_below_minimum"); // 0.99 USD
+      expect(await outcome(99, "jpy")).toBe("amount_below_minimum"); // 99 JPY
+      expect(await outcome(100, "jpy")).toBe(40); // 10 + 30 yen of 100 yen
+
+      // the sale is booked in yen, as charged
+      await sale(w, seller, 1_000, { currency: "jpy" });
+      expect(await accountsOf(w, seller)).toEqual({ "jpy/stripe_funds": 1_000, "jpy/seller_balance": 870, "jpy/platform_fees": 130, "jpy/disputed_funds": 0 });
     });
 
     it("refuses an amount that is not a whole, allowed number of minor units, without touching the database or Stripe", async () => {
