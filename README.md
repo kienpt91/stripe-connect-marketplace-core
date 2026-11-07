@@ -104,7 +104,7 @@ scripts/integration.sh                   # every test incl. PostgreSQL, against 
 scripts/demo.sh | tee docs/demo-output.txt
 ```
 
-The PostgreSQL tests have a connection budget (40 connections, `test/support/connection-budget.ts`) and run against a server with PostgreSQL's default `max_connections` of 100, as the CI service does: one test file at a time, every pool of the scenario suites opened through `openPool`. A monitor (`test/support/connection-monitor.ts`) refuses to start when the server allows fewer connections than the budget and fails the run when the measured peak is over it; the peak is printed at the end ("postgres connections: peak @@PEAK@@ of 97 usable").
+The PostgreSQL tests have a connection budget (40 connections, `test/support/connection-budget.ts`) and run against a server with PostgreSQL's default `max_connections` of 100, as the CI service does: one test file at a time, every pool of the scenario suites opened through `openPool`. A monitor (`test/support/connection-monitor.ts`) refuses to start when the server allows fewer connections than the budget and fails the run when the measured peak is over it; the peak is printed at the end ("postgres connections: peak 12 of 97 usable").
 
 The project is mounted read-only into a container that runs as you, drops every capability, has no network after the install and is limited to 4 CPUs and 6 GiB.
 
@@ -138,24 +138,26 @@ All numbers come from runs of the final tree in fresh containers (the dependency
 
 | Run | Files | Tests | Result |
 | --- | --- | --- | --- |
-| `npm run coverage` (default, no database) | @@OFF_FILES@@ | @@OFF_TESTS@@ | passed, thresholds met |
-| `scripts/integration.sh` (everything, PostgreSQL included) | @@ON_FILES@@ | @@ON_TESTS@@ | passed, thresholds met |
+| `npm run coverage` (default, no database) | 15 | 395 | passed, thresholds met |
+| `scripts/integration.sh` (everything, PostgreSQL included) | 21 | 567 | passed, thresholds met |
 | `scripts/demo.sh` | | | exit 0, "every claim held (8 of 8)" |
 
-@@DB_TESTS@@ of the tests need a database: the schema (@@SCHEMA@@), row level security (@@RLS@@), the adapter (@@ADAPTER@@), the real server and the demo database (@@SERVER@@), and every scenario again on PostgreSQL (@@SCENARIOS@@). The scenario suites (onboarding, checkout, webhooks in any order, refunds and disputes, isolation between sellers, reconciliation, shuffled delivery) run on the in-memory double **and** on PostgreSQL, so the double is only trusted because both agree. Mutating a policy, the append-only triggers, the balance trigger or `FORCE ROW LEVEL SECURITY` makes tests fail (checked by hand while writing them).
+172 of the tests need a database: the schema (39), row level security (32), the adapter (14), the real server and the demo database (10), and every scenario again on PostgreSQL (77). The scenario suites (onboarding, checkout, webhooks in any order, refunds and disputes, isolation between sellers, reconciliation, shuffled delivery) run on the in-memory double **and** on PostgreSQL, so the double is only trusted because both agree. Mutating a policy, the append-only triggers, the balance trigger or `FORCE ROW LEVEL SECURITY` makes tests fail (checked by hand while writing them).
 
 Coverage (lines / statements), thresholds domain >= 95, application >= 90, overall >= 85, enforced in both runs:
 
 | | default run | with PostgreSQL |
 | --- | --- | --- |
-| overall | @@COV_OFF_ALL@@ | @@COV_ON_ALL@@ |
-| `src/domain` | @@COV_OFF_DOMAIN@@ | @@COV_ON_DOMAIN@@ |
-| `src/application` | @@COV_OFF_APP@@ | @@COV_ON_APP@@ |
-| `src/composition` | @@COV_OFF_COMP@@ | @@COV_ON_COMP@@ |
-| `src/infrastructure` (http, stripe, system) | @@COV_OFF_INFRA@@ | @@COV_ON_INFRA@@ |
-| `src/infrastructure/postgres` | not measured without a database | @@COV_ON_PG@@ |
+| overall | 98.91 / 97.63 | 99.08 / 97.84 |
+| `src/domain` | 100 / 100 | 100 / 100 |
+| `src/application` | 98.42 / 97.60 | 98.42 / 97.60 |
+| `src/composition` | 93.33 / 91.11 | 97.61 / 93.44 |
+| `src/infrastructure/http` | 97.24 / 96.15 | 97.24 / 96.15 |
+| `src/infrastructure/stripe` | 99.41 / 96.48 | 99.41 / 96.48 |
+| `src/infrastructure` (clocks, logger) | 100 / 100 | 100 / 100 |
+| `src/infrastructure/postgres` | not measured without a database | 99.47 / 99.07 |
 
-Also run: release script tests (29 checks), secret scan on the tree and the full history (clean), dependency age check (@@DEPS@@ locked packages, none newer than 2026-10-24), the text audit and the link checks of `test/docs/docs.test.ts`.
+Also run: release script tests (29 checks), secret scan on the tree and the full history (clean), dependency age check (90 locked packages, none newer than 2026-10-24), the text audit and the link checks of `test/docs/docs.test.ts`.
 
 ## What is not verified
 
