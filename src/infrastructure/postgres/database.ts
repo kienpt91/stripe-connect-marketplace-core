@@ -30,6 +30,7 @@ const RETRYABLE = new Set(["40001", "40P01"]);
 export class PostgresDatabase implements Database {
   private readonly pool: pg.Pool;
   private readonly maxAttempts: number;
+  private readonly onPoolError: (code: string) => void;
 
   constructor(options: PostgresOptions) {
     this.pool = new pg.Pool({
@@ -42,8 +43,9 @@ export class PostgresDatabase implements Database {
       lock_timeout: options.lockTimeoutMs ?? 5_000,
       idle_in_transaction_session_timeout: 30_000,
     });
+    this.onPoolError = options.onPoolError ?? (() => undefined);
     // an error on an idle connection must not crash the process; the pool replaces the connection
-    this.pool.on("error", (error) => options.onPoolError?.(sqlState(error) ?? "unknown"));
+    this.pool.on("error", (error) => this.onPoolError(sqlState(error) ?? "unknown"));
     this.maxAttempts = options.maxAttempts ?? 3;
   }
 
@@ -59,6 +61,13 @@ export class PostgresDatabase implements Database {
     for (let attempt = 1; ; attempt++) {
       const client = await this.pool.connect();
       let broken = false;
+      // the pool only listens to idle connections: one that dies while a transaction has it (the server restarts, an administrator
+      // terminates the session) would otherwise raise an uncaught error and end the process. The connection is thrown away instead.
+      const onError = (error: Error): void => {
+        broken = true;
+        this.onPoolError(sqlState(error) ?? "unknown");
+      };
+      client.on("error", onError);
       try {
         await client.query("BEGIN");
         await client.query(`SET LOCAL ROLE ${ROLE[actor.kind]}`);
@@ -77,6 +86,7 @@ export class PostgresDatabase implements Database {
         }
         throw error;
       } finally {
+        client.off("error", onError);
         client.release(broken);
       }
     }

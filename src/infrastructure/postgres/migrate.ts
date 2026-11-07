@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
+
+/** The SQL migrations shipped with the package. */
+export const MIGRATIONS_DIR = fileURLToPath(new URL("../../../migrations", import.meta.url));
 
 export interface MigrationReport {
   readonly applied: readonly string[];
