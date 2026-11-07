@@ -86,24 +86,38 @@ describe("dependency rule over the real source tree", () => {
 
 describe("the SQL of the adapter", () => {
   /** every `${...}` inside a template string that is passed to a query: the only ones that may exist are listed, with why they are safe */
-  const interpolations = (file: string): string[] => {
+  const interpolations = (file: string, call = "(?:client\\.query|rows|affected)"): string[] => {
     const source = readFileSync(join(SRC, "infrastructure/postgres", file), "utf8");
     const found: string[] = [];
-    for (const m of source.matchAll(/(?:client\.query|rows|affected)\(\s*(?:client,\s*)?`([^`]*)`/g)) {
+    for (const m of source.matchAll(new RegExp(`${call}\\(\\s*(?:client,\\s*)?\`([^\`]*)\``, "g"))) {
       for (const inner of (m[1] as string).matchAll(/\$\{([^}]*)\}/g)) found.push(inner[1] as string);
     }
     return found;
   };
 
+  it("covers every file of the adapter: a file added to it has to be looked at here", () => {
+    expect(readdirSync(join(SRC, "infrastructure/postgres")).sort()).toEqual(["database.ts", "demo-database.ts", "errors.ts", "migrate.ts", "repositories.ts"]);
+  });
+
   it("puts no value into SQL text: the only interpolations are a role from a fixed map and a list of placeholders", () => {
     expect(interpolations("repositories.ts")).toEqual(['tuples.join(", ")']);
     expect(interpolations("database.ts")).toEqual(["ROLE[actor.kind]"]);
     expect(interpolations("migrate.ts")).toEqual([]);
+    expect(interpolations("errors.ts")).toEqual([]);
   });
 
   it("builds the tuples from numbered placeholders only", () => {
     const source = readFileSync(join(SRC, "infrastructure/postgres/repositories.ts"), "utf8");
     expect(source).toContain("`($${at + 1}, $${at + 2}, $${at + 3}, $${at + 4}, $${at + 5}, $${at + 6}, $${at + 7})`");
+  });
+
+  it("lists the interpolations of the demo database helper too: names and a password it generated itself, which DDL cannot take as parameters", () => {
+    // CREATE DATABASE, CREATE ROLE ... PASSWORD, GRANT and DROP take identifiers and a literal, never bind parameters
+    expect(interpolations("demo-database.ts", "\\b[a-z]+\\.query")).toEqual(["name", "role", "password", "role", "name", "role"]);
+    const source = readFileSync(join(SRC, "infrastructure/postgres/demo-database.ts"), "utf8");
+    for (const line of ['const suffix = randomBytes(5).toString("hex");', "const name = `demo_${suffix}`;", "const role = `marketplace_demo_${suffix}`;", 'const password = randomBytes(16).toString("hex");']) {
+      expect(source).toContain(line);
+    }
   });
 });
 
