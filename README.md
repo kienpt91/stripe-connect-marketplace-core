@@ -138,26 +138,26 @@ All numbers come from runs of the final tree in fresh containers (the dependency
 
 | Run | Files | Tests | Result |
 | --- | --- | --- | --- |
-| `npm run coverage` (default, no database) | 15 | 395 | passed, thresholds met |
-| `scripts/integration.sh` (everything, PostgreSQL included) | 21 | 567 | passed, thresholds met |
+| `npm run coverage` (default, no database) | 16 | 407 | passed, thresholds met |
+| `scripts/integration.sh` (everything, PostgreSQL included) | 22 | 585 | passed, thresholds met |
 | `scripts/demo.sh` | | | exit 0, "every claim held (8 of 8)" |
 
-172 of the tests need a database: the schema (39), row level security (32), the adapter (14), the real server and the demo database (10), and every scenario again on PostgreSQL (77). The scenario suites (onboarding, checkout, webhooks in any order, refunds and disputes, isolation between sellers, reconciliation, shuffled delivery) run on the in-memory double **and** on PostgreSQL, so the double is only trusted because both agree. Mutating a policy, the append-only triggers, the balance trigger or `FORCE ROW LEVEL SECURITY` makes tests fail (checked by hand while writing them).
+178 of the tests need a database: the schema (39), row level security (32), the adapter (14), the real server and the demo database (10), and every scenario again on PostgreSQL (83). The scenario suites (onboarding, checkout, webhooks in any order, refunds and disputes, isolation between sellers, reconciliation, shuffled delivery) run on the in-memory double **and** on PostgreSQL, so the double is only trusted because both agree. No mutation testing is recorded: whether the tests fail when a policy, an append-only trigger, the balance trigger or `FORCE ROW LEVEL SECURITY` is removed was tried by hand while the tests were written, and that is neither kept nor reproducible from this repository.
 
 Coverage (lines / statements), thresholds domain >= 95, application >= 90, overall >= 85, enforced in both runs:
 
 | | default run | with PostgreSQL |
 | --- | --- | --- |
-| overall | 98.91 / 97.63 | 99.08 / 97.84 |
+| overall | 98.91 / 97.57 | 99.08 / 97.79 |
 | `src/domain` | 100 / 100 | 100 / 100 |
-| `src/application` | 98.42 / 97.60 | 98.42 / 97.60 |
+| `src/application` | 98.44 / 97.39 | 98.44 / 97.39 |
 | `src/composition` | 93.33 / 91.11 | 97.61 / 93.44 |
 | `src/infrastructure/http` | 97.24 / 96.15 | 97.24 / 96.15 |
 | `src/infrastructure/stripe` | 99.41 / 96.48 | 99.41 / 96.48 |
 | `src/infrastructure` (clocks, logger) | 100 / 100 | 100 / 100 |
 | `src/infrastructure/postgres` | not measured without a database | 99.47 / 99.07 |
 
-Also run: release script tests (29 checks), secret scan on the tree and the full history (clean), dependency age check (90 locked packages, none newer than 2026-10-24), the checks of `test/docs/docs.test.ts` (links, contact information in the text) and of the commit message hook (`test/docs/commit-msg.test.ts`).
+Also run: release script tests (29 checks), secret scan on the tree and the full history (clean), dependency age check (90 locked packages, none newer than 2026-10-24; it asks the npm registry, so it is the one check that needs the network), the checks of `test/docs/docs.test.ts` (links, contact information in the text) and of the commit message hook (`test/docs/commit-msg.test.ts`).
 
 ## What is not verified
 
