@@ -1,0 +1,59 @@
+{
+  "name": "stripe-connect-marketplace-core",
+  "version": "0.1.0",
+  "description": "Reference core for the payments backend of a two-sided marketplace on Stripe Connect: a seller onboarding state machine, destination charges with an integer fee, an append-only double-entry ledger, idempotent signed webhooks that survive duplicates and reordering, payout reconciliation, and row level security between sellers in PostgreSQL.",
+  "keywords": [
+    "stripe-connect",
+    "marketplace",
+    "payments",
+    "double-entry-ledger",
+    "webhooks",
+    "idempotency",
+    "reconciliation",
+    "postgres",
+    "row-level-security"
+  ],
+  "license": "MIT",
+  "author": "Kien Phan",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "stripe-connect-marketplace-core": "dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && npm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "start": "node dist/bin.js serve",
+    "migrate": "node dist/bin.js migrate",
+    "reconcile": "node dist/bin.js reconcile",
+    "demo": "node dist/bin.js demo",
+    "check:deps-age": "node scripts/check-dep-age.mjs"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "@vitest/coverage-v8": "5.0.5",
+    "typescript": "6.0.3",
+    "vitest": "5.0.5"
+  }
+}
