@@ -157,7 +157,7 @@ Coverage (lines / statements), thresholds domain >= 95, application >= 90, overa
 | `src/infrastructure` (clocks, logger) | 100 / 100 | 100 / 100 |
 | `src/infrastructure/postgres` | not measured without a database | 99.47 / 99.07 |
 
-Also run: release script tests (29 checks), secret scan on the tree and the full history (clean), dependency age check (90 locked packages, none newer than 2026-10-24), the text audit and the link checks of `test/docs/docs.test.ts`.
+Also run: release script tests (29 checks), secret scan on the tree and the full history (clean), dependency age check (90 locked packages, none newer than 2026-10-24), the checks of `test/docs/docs.test.ts` (links, contact information in the text) and of the commit message hook (`test/docs/commit-msg.test.ts`).
 
 ## What is not verified
 

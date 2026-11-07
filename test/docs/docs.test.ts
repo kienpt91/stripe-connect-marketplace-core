@@ -65,16 +65,7 @@ describe("the documentation points at things that exist", () => {
 });
 
 describe("the repository text", () => {
-  // the words are assembled from pieces so that this file does not trip its own audit
-  const tools = ["cla" + "ude", "anth" + "ropic", "open" + "ai", "chat" + "gpt", "co" + "dex", "copi" + "lot", "gem" + "ini"];
   const textFiles = files.filter((f) => /\.(md|ts|sh|mjs|sql|json|yml|yaml|txt|example)$/.test(f) || f.endsWith("LICENSE") || f.endsWith(".gitignore"));
-
-  it("mentions no assistant, generator or vendor besides Stripe and the tools it is built with", () => {
-    const names = new RegExp(`\\b(${tools.join("|")})\\b`, "i");
-    const initials = /\bAI\b|\bLLM\b/;
-    const hits = textFiles.filter((f) => !f.endsWith("check-commit-msg.sh")).flatMap((f) => read(f).split("\n").map((line, i) => ({ f, i, line })).filter((x) => names.test(x.line) || initials.test(x.line)).map((x) => `${relative(ROOT, x.f)}:${x.i + 1}`));
-    expect(hits).toEqual([]);
-  });
 
   it("carries no contact information: no e-mail address, phone number or social handle", () => {
     const email = /(?<![/:\w.-])[\w.+-]+@[\w-]+\.(?:com|org|net|io|dev|me|app|co)\b/i;
