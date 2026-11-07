@@ -44,11 +44,15 @@ export async function ingestEvent(deps: Deps, body: unknown): Promise<IngestResu
   const event = parsed.value;
   const system = { kind: "system" } as const;
 
-  // an id that is already recorded costs one read: no call to Stripe, no lock
-  if (await deps.db.transaction(system, (tx) => tx.events.exists(event.id))) return { status: "duplicate", eventId: event.id, reason: null };
+  // an id that is already recorded costs one read: no call to Stripe, no lock. An account that is not a seller of ours needs no call either.
+  const before = await deps.db.transaction(system, async (tx) => ({
+    duplicate: await tx.events.exists(event.id),
+    seller: event.fact.kind === "account_updated" ? await tx.sellers.getByAccount(event.fact.accountId) : undefined,
+  }));
+  if (before.duplicate) return { status: "duplicate", eventId: event.id, reason: null };
 
   let observation: Observation | undefined;
-  if (event.fact.kind === "account_updated") {
+  if (event.fact.kind === "account_updated" && before.seller !== undefined) {
     // read before the transaction: a slow network call must not hold a database transaction open
     const observedAt = deps.clock.now();
     const snapshot = await deps.stripe.retrieveAccount(event.fact.accountId);

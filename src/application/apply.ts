@@ -44,7 +44,8 @@ export async function applyFact(tx: Tx, eventId: string, fact: Fact, observation
     case "ignored":
       return ignored("unhandled_event_type");
     case "account_updated":
-      return observation === undefined ? rejected("no_observation") : applyAccount(tx, observation);
+      // no observation: the ingestion found no seller with this account, so there is nothing to read from Stripe for
+      return observation === undefined ? ignored("unknown_account") : applyAccount(tx, observation);
     case "charge_succeeded":
       return applyCharge(tx, eventId, fact.charge);
     case "refund":

@@ -23,6 +23,17 @@ export function onboardingScenarios(open: DbFactory): void {
       expect(w.stripe.calls.filter((c) => c.method === "createAccount")).toHaveLength(1);
     });
 
+    it("creates one seller and one Stripe account when the same registration arrives ten times at once", async () => {
+      const w = world();
+      const id = sellerUuid();
+      const results = await Promise.all(Array.from({ length: 10 }, () => registerSeller(w.deps, { sellerId: id, displayName: "Alba Ceramics", country: "DE" })));
+      expect(results.every((r) => r.ok)).toBe(true);
+      expect(new Set(results.map((r) => (r.ok ? r.value.accountId : ""))).size).toBe(1);
+      expect((await w.db.transaction(system, (tx) => tx.sellers.list())).filter((s) => s.id === id)).toHaveLength(1);
+      // Stripe was asked more than once, with one key, and answered with one account
+      expect(new Set(w.stripe.calls.filter((c) => c.method === "createAccount").map((c) => (c.input as { idempotencyKey: string }).idempotencyKey))).toEqual(new Set([`seller-${id}`]));
+    });
+
     it("repeats safely after a crash between Stripe's answer and the row: the idempotency key returns the same account", async () => {
       const w = world();
       const id = sellerUuid();
@@ -152,6 +163,24 @@ export function onboardingScenarios(open: DbFactory): void {
       w.world.stripe.injectFailure("retrieveAccount", new GatewayError("unavailable", "down"));
       expect(await refreshSeller(w.world.deps, seller.id)).toEqual({ ok: false, error: "gateway_failed" });
       await w.close();
+    });
+
+    it("loses an `account.updated` event that overtakes the seller's row, and reconciliation finds it and `refreshSeller` repairs it", async () => {
+      const f = await freshWorld(open);
+      const w = f.world;
+      const id = sellerUuid();
+      const account = await w.stripe.createAccount({ sellerId: id, country: "DE", idempotencyKey: `seller-${id}` }); // Stripe has answered; the row is not written yet
+      w.stripe.touch(account.accountId);
+      expect((await deliverAll(w))[0]).toMatchObject({ status: "ignored", reason: "unknown_account" });
+      const registered = await registerSeller(w.deps, { sellerId: id, displayName: "Alba", country: "DE" });
+      if (!registered.ok) throw new Error(registered.error);
+      expect(registered.value.state).toBe("new");
+      const before = await reconcile(w.deps, { since: 0 });
+      expect(before.ok && before.value.findings.map((x) => x.kind)).toEqual(["seller_state_mismatch"]);
+      expect(await refreshSeller(w.deps, registered.value.id)).toEqual({ ok: true, value: { state: "requirements_due", changed: true } });
+      const after = await reconcile(w.deps, { since: 0 });
+      expect(after.ok && after.value.findings).toEqual([]);
+      await f.close();
     });
 
     it("refuses to refresh a rejected seller back to life", async () => {

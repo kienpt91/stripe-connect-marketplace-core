@@ -20,4 +20,5 @@ Outcomes: `applied`; `stale` (valid, nothing new); `ignored` (not this marketpla
 - A rejected charge leaves its transfer waiting; reconciliation reports it as stuck (0006).
 - A dispute that goes to `lost` and then to an appeal state is not modelled; the later event is stale.
 - Events of one object with the same second of `created` are ordered by rank alone.
+- An `account.updated` for an account that has no seller row yet is ignored without a call to Stripe; the one that arrives between Stripe's answer and the insert of the seller is lost, and `reconcile` plus `refreshSeller` repair it.
 - A held lock per charge serialises that charge's events; throughput across charges is unaffected.

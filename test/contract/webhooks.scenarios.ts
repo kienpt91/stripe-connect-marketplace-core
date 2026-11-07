@@ -341,8 +341,10 @@ export function webhookScenarios(open: DbFactory): void {
       expect(result.map((r) => `${r.status}:${r.reason}`)).toEqual([
         "ignored:not_a_marketplace_charge", "ignored:not_a_marketplace_charge", "ignored:not_a_marketplace_charge", "ignored:unhandled_event_type", "ignored:unknown_account",
       ]);
-      // an account Stripe knows and the marketplace does not: the account is read from Stripe, which does not know it either
-      await expect(deliver(w, [account])).rejects.toMatchObject({ code: "not_found" });
+      // an account the marketplace has no seller for needs no read from Stripe, and a retry loop on a deleted account is avoided
+      const reads = w.stripe.calls.filter((c) => c.method === "retrieveAccount").length;
+      expect((await deliver(w, [account]))[0]).toMatchObject({ status: "ignored", reason: "unknown_account" });
+      expect(w.stripe.calls.filter((c) => c.method === "retrieveAccount")).toHaveLength(reads);
       expect(await entriesOf(w, seller)).toEqual([]);
     });
 
