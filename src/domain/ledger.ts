@@ -7,7 +7,7 @@ import { err, ok, type Result } from "./result.js";
  *
  *   stripe_funds     asset      everything Stripe holds for the platform and its sellers (the platform balance and the connected balances)
  *   seller_balance   liability  what the platform owes a seller: net sales, less refunds, lost disputes and payouts
- *   platform_fees    revenue    the application fees the platform kept
+ *   platform_fees    revenue    the application fees the platform kept, less the share it gave back and the lost disputes it had to bear itself; it can go below zero
  *   disputed_funds   asset      money Stripe withdrew for an open dispute; it comes back if the dispute is won
  *
  * Stripe's own processing fees are not modelled (SECURITY.md, docs/adr/0003).
@@ -94,11 +94,14 @@ export function saleEntry(c: Common & { chargeId: string; amount: number; fee: n
   };
 }
 
-/** A refund succeeded: the money goes back to the buyer, out of the seller's balance and the platform's fee in proportion to the sale. */
-export function refundEntry(c: Common & { refundId: string; amount: number; feePart: number }): Entry {
+/**
+ * A refund succeeded: the money goes back to the buyer, out of the seller's balance and the platform's fee in proportion to the sale.
+ * `absorbed` is the part of the refund that a lost dispute had already taken from the seller and the fee: the platform bears it.
+ */
+export function refundEntry(c: Common & { refundId: string; amount: number; feePart: number; absorbed: number }): Entry {
   return {
     postingKey: `refund:${c.refundId}`, kind: "refund", sellerId: c.sellerId, currency: c.currency, subject: c.refundId, occurredAt: c.occurredAt,
-    lines: nonZero([DEBIT("seller_balance", c.amount - c.feePart), DEBIT("platform_fees", c.feePart), CREDIT("stripe_funds", c.amount)]),
+    lines: nonZero([DEBIT("seller_balance", c.amount - c.feePart - c.absorbed), DEBIT("platform_fees", c.feePart + c.absorbed), CREDIT("stripe_funds", c.amount)]),
   };
 }
 
@@ -118,11 +121,15 @@ export function disputeWonEntry(c: Common & { disputeId: string; amount: number 
   };
 }
 
-/** The dispute was lost: the withdrawn money is gone, taken from the seller's balance and the platform's fee in proportion to the sale. */
-export function disputeLostEntry(c: Common & { disputeId: string; amount: number; feePart: number }): Entry {
+/**
+ * The dispute was lost: the withdrawn money is gone. It is taken from the seller's balance and the platform's fee in proportion to
+ * the sale, as far as the sale has anything left to take back. `absorbed` is the rest, the part of the dispute that a refund had
+ * already taken from the seller and the fee: nobody can be charged for it a second time, so the platform bears it.
+ */
+export function disputeLostEntry(c: Common & { disputeId: string; amount: number; feePart: number; absorbed: number }): Entry {
   return {
     postingKey: `dispute:${c.disputeId}:lost`, kind: "dispute_lost", sellerId: c.sellerId, currency: c.currency, subject: c.disputeId, occurredAt: c.occurredAt,
-    lines: nonZero([DEBIT("seller_balance", c.amount - c.feePart), DEBIT("platform_fees", c.feePart), CREDIT("disputed_funds", c.amount)]),
+    lines: nonZero([DEBIT("seller_balance", c.amount - c.feePart - c.absorbed), DEBIT("platform_fees", c.feePart + c.absorbed), CREDIT("disputed_funds", c.amount)]),
   };
 }
 

@@ -10,8 +10,9 @@ import { accountsOf, freshWorld, operator, sellerBalance, system, type DbFactory
 
 /**
  * One busy afternoon of two sellers, as Stripe would report it: sales, partial refunds (one pending that succeeds, one that fails, one
- * that succeeds and then fails), disputes that are won and lost, payouts (one paid, one that failed), account changes and events this
- * system does not handle. All of it is done at Stripe first; the events come back as one list in the order they were created.
+ * that succeeds and then fails), disputes that are won and lost (one lost on top of a refund of the same money), payouts (one paid, one
+ * that failed), account changes and events this system does not handle. All of it is done at Stripe first; the events come back as one
+ * list in the order they were created.
  */
 async function busyAfternoon(w: World): Promise<{ sellers: SellerRecord[]; events: unknown[] }> {
   const one = await enabledSeller(w, sellerUuid(), "One");
@@ -45,6 +46,13 @@ async function busyAfternoon(w: World): Promise<{ sellers: SellerRecord[]; event
   const d = await pay(two, 2_000);
   const undone = await refund(d.chargeId, d.orderId, 2_000, "refund-d-1");
   w.stripe.failRefund(undone.refundId);
+  // a dispute for the whole charge, lost after a refund of part of it went through: what the sale had left is charged to the seller and the
+  // fee, the 2000 that were taken twice are the platform's, and the books must not depend on which of the two events is applied first
+  const e = await pay(two, 6_000);
+  const overlapped = w.stripe.openDispute(e.chargeId);
+  await refund(e.chargeId, e.orderId, 2_000, "refund-e-1");
+  w.stripe.closeDispute(overlapped, "lost");
+  w.stripe.reverseTransfer(e.chargeId, 3_580); // the operator recovers the seller's share of the 4000 the sale had left: 4000 less the platform's fee part (420)
 
   w.stripe.settleBalances();
   w.stripe.settlePayout(w.stripe.payout(two.accountId, "usd", 3_000));
@@ -59,12 +67,16 @@ async function busyAfternoon(w: World): Promise<{ sellers: SellerRecord[]; event
   return { sellers: [one, two], events: [...w.stripe.takeEvents(), ...noise] };
 }
 
-/** What a history ended in, with no ids in it: the same history must give the same fingerprint however its events were delivered. */
+/**
+ * What a history ended in, with no ids in it: the same history must give the same fingerprint however its events were delivered. The part
+ * of an overlapping refund and lost dispute that the platform bears is booked on whichever of the two is applied second, so it is compared
+ * as one total, not per object.
+ */
 async function fingerprint(w: World, sellers: readonly SellerRecord[]): Promise<unknown> {
   const rows = await w.db.transaction(operator, async (tx) => ({
     payments: (await tx.payments.list()).filter((p) => sellers.some((s) => s.id === p.sellerId)).map((p) => ({ amount: p.amount, fee: p.fee, refunded: p.refunded, reversed: p.reversed, reversedFee: p.reversedFee, anomaly: p.anomaly })),
     objects: [...(await tx.objects.list("refund")), ...(await tx.objects.list("dispute")), ...(await tx.objects.list("payout")), ...(await tx.objects.list("transfer"))]
-      .filter((o) => sellers.some((s) => s.id === o.sellerId)).map((o) => ({ kind: o.kind, amount: o.amount, status: o.status, rank: o.rank, secondary: o.secondaryAmount })),
+      .filter((o) => sellers.some((s) => s.id === o.sellerId)).map((o) => ({ kind: o.kind, amount: o.amount, status: o.status, rank: o.rank, secondary: o.kind === "transfer" ? o.secondaryAmount : 0, absorbed: o.kind === "transfer" ? 0 : o.secondaryAmount })),
     orders: (await Promise.all(sellers.map((s) => tx.orders.listForSeller(s.id)))).flat().map((o) => ({ amount: o.amount, status: o.status })),
     states: await Promise.all(sellers.map(async (s) => (await tx.sellers.get(s.id))?.state)),
     flagged: (await tx.events.flagged()).length,
@@ -72,7 +84,9 @@ async function fingerprint(w: World, sellers: readonly SellerRecord[]): Promise<
   const sorted = (list: object[]) => list.map((x) => JSON.stringify(x)).sort();
   const accounts = await Promise.all(sellers.map((s) => accountsOf(w, s)));
   const balances = await Promise.all(sellers.map((s) => sellerBalance(w, s)));
-  return { payments: sorted(rows.payments), objects: sorted(rows.objects), orders: sorted(rows.orders), states: rows.states, flagged: rows.flagged, accounts, balances };
+  const absorbed = rows.objects.reduce((sum, o) => sum + o.absorbed, 0);
+  const objects = rows.objects.map(({ absorbed: _part, ...rest }) => rest);
+  return { payments: sorted(rows.payments), objects: sorted(objects), absorbed, orders: sorted(rows.orders), states: rows.states, flagged: rows.flagged, accounts, balances };
 }
 
 export function convergenceScenarios(open: DbFactory, iterations: number): void {

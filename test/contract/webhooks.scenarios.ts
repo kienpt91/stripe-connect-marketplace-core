@@ -374,8 +374,6 @@ export function webhookScenarios(open: DbFactory): void {
       expect((await deliver(w, [event("refund.updated", refundObject({ id: "re_1Original001", charge: chargeId, amount: 5_000, status: "failed" }))]))[0]).toMatchObject({ status: "rejected", reason: "object_changed" });
       expect((await deliver(w, [event("charge.dispute.created", disputeObject({ id: "du_1TooMuch0001", charge: chargeId, amount: 10_001 }))]))[0]).toMatchObject({ status: "rejected", reason: "dispute_exceeds_charge" });
       expect((await deliver(w, [event("charge.dispute.created", disputeObject({ id: "du_1Euros000001", charge: chargeId, currency: "eur" }))]))[0]).toMatchObject({ status: "rejected", reason: "currency_mismatch" });
-      const lost = event("charge.dispute.closed", disputeObject({ id: "du_1AfterRefund", charge: chargeId, amount: 4_001, status: "lost" }));
-      expect((await deliver(w, [lost]))[0]).toMatchObject({ status: "rejected", reason: "dispute_exceeds_charge" });
       expect(await sellerBalance(w, seller)).toEqual({ usd: 8_970 - (6_000 - 618) });
       const changed = event("charge.dispute.updated", disputeObject({ id: "du_1Original001", charge: chargeId, amount: 1_000 }));
       await deliver(w, [changed]);

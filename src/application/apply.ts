@@ -96,6 +96,21 @@ async function applyCharge(tx: Tx, eventId: string, charge: ChargeFact): Promise
   return applied(anomaly);
 }
 
+/**
+ * How an amount taken back from a sale (a refund, a lost dispute) is borne. The sale can give back only what has not been taken
+ * back yet, and that part is shared between the seller and the platform's fee in proportion to the sale (`allocateReversal`).
+ * What is over has already been taken from the seller and the fee by the other reversal (a refund that went through while a
+ * dispute was open, or the dispute lost first): nobody can be charged for it twice, so the platform bears it (`absorbed`).
+ * Whichever of the two is applied first, the sale ends up fully taken back and the platform ends up with the same loss.
+ */
+function takeBack(payment: PaymentRecord, amount: number): { readonly taken: number; readonly feePart: number; readonly absorbed: number } {
+  const taken = Math.min(amount, payment.amount - payment.reversed);
+  if (taken < 1) return { taken: 0, feePart: 0, absorbed: amount };
+  const split = allocateReversal({ amount: payment.amount, fee: payment.fee }, { amount: payment.reversed, fee: payment.reversedFee }, taken);
+  if (!split.ok) throw new Error(`${taken} of the ${payment.amount - payment.reversed} left of ${payment.chargeId} could not be allocated: ${split.error}`);
+  return { taken, feePart: split.value.feePart, absorbed: amount - taken };
+}
+
 async function applyRefund(tx: Tx, eventId: string, refund: RefundFact): Promise<Outcome> {
   const payment = await tx.payments.get(refund.chargeId);
   if (payment === undefined) return deferred(`waiting for ${refund.chargeId}`);
@@ -106,23 +121,26 @@ async function applyRefund(tx: Tx, eventId: string, refund: RefundFact): Promise
   if (known !== undefined && known.rank >= rank) return stale("not_newer_than_stored");
 
   let feePart = known?.feePart ?? 0;
+  let absorbed = known?.secondaryAmount ?? 0;
   if (rank === 2) {
-    const split = allocateReversal({ amount: payment.amount, fee: payment.fee }, { amount: payment.reversed, fee: payment.reversedFee }, refund.amount);
-    if (!split.ok) return rejected("refund_exceeds_charge");
-    feePart = split.value.feePart;
-    await post(tx, refundEntry({ refundId: refund.id, sellerId: payment.sellerId, currency: refund.currency, amount: refund.amount, feePart, occurredAt: refund.createdAt }), eventId);
-    await tx.payments.addReversal(payment.chargeId, { refunded: refund.amount, reversed: refund.amount, reversedFee: feePart });
+    // refunds alone can never add up to more than the charge; what a lost dispute has taken back does not count against them
+    if (payment.refunded + refund.amount > payment.amount) return rejected("refund_exceeds_charge");
+    const share = takeBack(payment, refund.amount);
+    feePart = share.feePart;
+    absorbed = share.absorbed;
+    await post(tx, refundEntry({ refundId: refund.id, sellerId: payment.sellerId, currency: refund.currency, amount: refund.amount, feePart, absorbed, occurredAt: refund.createdAt }), eventId);
+    await tx.payments.addReversal(payment.chargeId, { refunded: refund.amount, reversed: share.taken, reversedFee: feePart });
     await tx.orders.setStatus(payment.orderId, orderStatusFor(payment, payment.refunded + refund.amount));
   } else if (rank === 3 && known !== undefined && known.rank === 2) {
     // a refund that had succeeded failed after all: the money is back with the platform and the seller
-    const original = refundEntry({ refundId: refund.id, sellerId: payment.sellerId, currency: refund.currency, amount: refund.amount, feePart, occurredAt: refund.createdAt });
+    const original = refundEntry({ refundId: refund.id, sellerId: payment.sellerId, currency: refund.currency, amount: refund.amount, feePart, absorbed, occurredAt: refund.createdAt });
     await post(tx, reversalOf(original, "refund_reversal", refund.createdAt), eventId);
-    await tx.payments.addReversal(payment.chargeId, { refunded: -refund.amount, reversed: -refund.amount, reversedFee: -feePart });
+    await tx.payments.addReversal(payment.chargeId, { refunded: -refund.amount, reversed: -(refund.amount - absorbed), reversedFee: -feePart });
     await tx.orders.setStatus(payment.orderId, orderStatusFor(payment, payment.refunded - refund.amount));
   }
   await upsert(tx, known, {
     kind: "refund", id: refund.id, sellerId: payment.sellerId, accountId: payment.accountId, chargeId: payment.chargeId, currency: refund.currency,
-    amount: refund.amount, feePart, secondaryAmount: 0, status: refund.status, rank, createdAt: refund.createdAt,
+    amount: refund.amount, feePart, secondaryAmount: absorbed, status: refund.status, rank, createdAt: refund.createdAt,
   });
   return applied();
 }
@@ -138,21 +156,16 @@ async function applyDispute(tx: Tx, eventId: string, dispute: DisputeFact): Prom
   if (known !== undefined && known.rank >= rank) return stale(rank === 2 && known.status !== dispute.status ? "conflicting_close" : "not_newer_than_stored");
 
   const common = { disputeId: dispute.id, sellerId: payment.sellerId, currency: dispute.currency, amount: dispute.amount, occurredAt: dispute.createdAt };
-  let feePart = 0;
-  if (rank === 2 && dispute.status === "lost") {
-    const split = allocateReversal({ amount: payment.amount, fee: payment.fee }, { amount: payment.reversed, fee: payment.reversedFee }, dispute.amount);
-    if (!split.ok) return rejected("dispute_exceeds_charge");
-    feePart = split.value.feePart;
-  }
+  const share = rank === 2 && dispute.status === "lost" ? takeBack(payment, dispute.amount) : { taken: 0, feePart: 0, absorbed: 0 };
   if (rank >= 1) await post(tx, disputeOpenedEntry(common), eventId);
   if (rank === 2 && dispute.status === "won") await post(tx, disputeWonEntry(common), eventId);
   if (rank === 2 && dispute.status === "lost") {
-    await post(tx, disputeLostEntry({ ...common, feePart }), eventId);
-    await tx.payments.addReversal(payment.chargeId, { refunded: 0, reversed: dispute.amount, reversedFee: feePart });
+    await post(tx, disputeLostEntry({ ...common, feePart: share.feePart, absorbed: share.absorbed }), eventId);
+    await tx.payments.addReversal(payment.chargeId, { refunded: 0, reversed: share.taken, reversedFee: share.feePart });
   }
   await upsert(tx, known, {
     kind: "dispute", id: dispute.id, sellerId: payment.sellerId, accountId: payment.accountId, chargeId: payment.chargeId, currency: dispute.currency,
-    amount: dispute.amount, feePart, secondaryAmount: 0, status: dispute.status, rank, createdAt: dispute.createdAt,
+    amount: dispute.amount, feePart: share.feePart, secondaryAmount: share.absorbed, status: dispute.status, rank, createdAt: dispute.createdAt,
   });
   return applied();
 }

@@ -133,7 +133,7 @@ export interface ObjectRecord {
   readonly amount: number;
   /** the platform's part of the amount, for a refund and a lost dispute; 0 otherwise */
   readonly feePart: number;
-  /** a transfer's amount reversed so far; 0 otherwise */
+  /** a transfer's amount reversed so far; for a lost dispute, the part the platform bore itself because a refund had already taken the rest of the sale; 0 otherwise */
   readonly secondaryAmount: number;
   readonly status: string;
   readonly rank: number;

@@ -40,13 +40,21 @@ describe("entries", () => {
   });
 
   it("a refund takes the seller's part and the platform's part back and credits Stripe out", () => {
-    const e = refundEntry({ ...common, refundId: "re_1AbCdEfGh", amount: 500, feePart: 65 });
+    const e = refundEntry({ ...common, refundId: "re_1AbCdEfGh", amount: 500, feePart: 65, absorbed: 0 });
     expect(e.lines).toEqual([
       { account: "seller_balance", side: "debit", amount: 435 },
       { account: "platform_fees", side: "debit", amount: 65 },
       { account: "stripe_funds", side: "credit", amount: 500 },
     ]);
     balanced(e);
+    // a lost dispute had already taken 120 of the 500 from the seller and the fee: the platform bears them
+    const overlapped = refundEntry({ ...common, refundId: "re_1AbCdEfGh", amount: 500, feePart: 40, absorbed: 120 });
+    expect(overlapped.lines).toEqual([
+      { account: "seller_balance", side: "debit", amount: 340 },
+      { account: "platform_fees", side: "debit", amount: 160 },
+      { account: "stripe_funds", side: "credit", amount: 500 },
+    ]);
+    balanced(overlapped);
   });
 
   it("a dispute is held aside when opened, reinstated when won, and charged to seller and platform when lost", () => {
@@ -55,13 +63,25 @@ describe("entries", () => {
     expect(open.lines).toEqual([{ account: "disputed_funds", side: "debit", amount: 1000 }, { account: "stripe_funds", side: "credit", amount: 1000 }]);
     const won = disputeWonEntry({ ...common, disputeId: "du_1AbCdEfGh", amount: 1000 });
     expect(won.lines).toEqual([{ account: "stripe_funds", side: "debit", amount: 1000 }, { account: "disputed_funds", side: "credit", amount: 1000 }]);
-    const lost = disputeLostEntry({ ...common, disputeId: "du_1AbCdEfGh", amount: 1000, feePart: 130 });
+    const lost = disputeLostEntry({ ...common, disputeId: "du_1AbCdEfGh", amount: 1000, feePart: 130, absorbed: 0 });
     expect(lost.lines).toEqual([
       { account: "seller_balance", side: "debit", amount: 870 },
       { account: "platform_fees", side: "debit", amount: 130 },
       { account: "disputed_funds", side: "credit", amount: 1000 },
     ]);
     for (const e of [open, won, lost]) balanced(e);
+  });
+
+  it("a lost dispute puts the part a refund had already taken on the platform, and nothing on the seller when no sale is left", () => {
+    const partly = disputeLostEntry({ ...common, disputeId: "du_1AbCdEfGh", amount: 1000, feePart: 40, absorbed: 600 });
+    expect(partly.lines).toEqual([
+      { account: "seller_balance", side: "debit", amount: 360 },
+      { account: "platform_fees", side: "debit", amount: 640 },
+      { account: "disputed_funds", side: "credit", amount: 1000 },
+    ]);
+    const wholly = disputeLostEntry({ ...common, disputeId: "du_1AbCdEfGh", amount: 1000, feePart: 0, absorbed: 1000 });
+    expect(wholly.lines).toEqual([{ account: "platform_fees", side: "debit", amount: 1000 }, { account: "disputed_funds", side: "credit", amount: 1000 }]);
+    for (const e of [partly, wholly]) balanced(e);
   });
 
   it("a payout moves the seller's balance out of Stripe", () => {
@@ -78,7 +98,7 @@ describe("entries", () => {
     expect(back.occurredAt).toBe(5);
     expect(back.lines).toEqual([{ account: "seller_balance", side: "credit", amount: 700 }, { account: "stripe_funds", side: "debit", amount: 700 }]);
     balanced(back);
-    const refund = refundEntry({ ...common, refundId: "re_1AbCdEfGh", amount: 500, feePart: 65 });
+    const refund = refundEntry({ ...common, refundId: "re_1AbCdEfGh", amount: 500, feePart: 65, absorbed: 120 });
     const lines = [...refund.lines, ...reversalOf(refund, "refund_reversal", 9).lines];
     for (const account of ACCOUNTS) expect(accountBalance(account, totalsOf(lines, account))).toBe(0);
   });
@@ -91,8 +111,9 @@ describe("entries", () => {
       const part = int(next, 1, amount);
       const feePart = int(next, 0, Math.min(fee, part));
       balanced(saleEntry({ ...common, chargeId: "ch_1AbCdEfGh", amount, fee }));
-      balanced(refundEntry({ ...common, refundId: "re_1AbCdEfGh", amount: part, feePart }));
-      balanced(disputeLostEntry({ ...common, disputeId: "du_1AbCdEfGh", amount: part, feePart }));
+      const absorbed = int(next, 0, part - feePart);
+      balanced(refundEntry({ ...common, refundId: "re_1AbCdEfGh", amount: part, feePart, absorbed }));
+      balanced(disputeLostEntry({ ...common, disputeId: "du_1AbCdEfGh", amount: part, feePart, absorbed }));
     }
   });
 });

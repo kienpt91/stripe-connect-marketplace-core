@@ -127,7 +127,7 @@ The ledger in one table (amounts are minor units; the rules are in [ADR 0003](do
 | --- | --- | --- |
 | sale | `stripe_funds` (the charge) | `seller_balance` (net), `platform_fees` (fee) |
 | refund | `seller_balance`, `platform_fees` (pro rata) | `stripe_funds` |
-| dispute opened / won / lost | `disputed_funds` / `stripe_funds` / `seller_balance` and `platform_fees` | `stripe_funds` / `disputed_funds` / `disputed_funds` |
+| dispute opened / won / lost | `disputed_funds` / `stripe_funds` / `seller_balance` and `platform_fees` (pro rata) | `stripe_funds` / `disputed_funds` / `disputed_funds` |
 | payout | `seller_balance` | `stripe_funds` |
 
 Decisions, with their trade-offs: [0001 layers](docs/adr/0001-layers-and-the-dependency-rule.md), [0002 money and the fee](docs/adr/0002-money-is-integers-and-the-fee-is-the-platforms.md), [0003 the ledger and who bears what](docs/adr/0003-the-ledger-and-who-bears-what.md), [0004 events arrive twice and out of order](docs/adr/0004-events-arrive-twice-and-out-of-order.md), [0005 roles, row level security, append-only](docs/adr/0005-roles-row-level-security-and-an-append-only-ledger.md), [0006 reconciliation](docs/adr/0006-reconciliation-reads-and-never-repairs.md), [0007 a fake Stripe and scenarios on two stores](docs/adr/0007-a-fake-stripe-and-scenarios-on-two-stores.md). The threat model, with a test named for every claim (checked by `test/docs/docs.test.ts`) and a list of what is not guaranteed, is in [SECURITY.md](SECURITY.md). Deployment: [docs/deployment.md](docs/deployment.md). Adapting it to a client's Supabase and Next.js app: [docs/adapting.md](docs/adapting.md).
@@ -162,7 +162,7 @@ Also run: release script tests (29 checks), secret scan on the tree and the full
 ## What is not verified
 
 - **Never run against Stripe.** No real account, no test-mode key, no Stripe CLI, no real webhook delivery. Event shapes, endpoints and parameters were written from Stripe's public API reference. `HttpStripeGateway` has only been run against a fake server on loopback; it creates Express accounts and Checkout Sessions with a destination and an application fee. Run a complete test-mode flow and `reconcile` before trusting any of it.
-- **The money rules are this repository's rules**, not Stripe's: how a refund splits the platform's fee from the seller's share, and that a lost dispute is charged to the seller in the ledger while the platform pays at Stripe until an operator reverses the transfer. Stripe's own processing fees, dispute fees, taxes and appeals are not modelled (SECURITY.md).
+- **The money rules are this repository's rules**, not Stripe's: how a refund splits the platform's fee from the seller's share, that a lost dispute is charged to the seller in the ledger while the platform pays at Stripe until an operator reverses the transfer, and that when a charge in dispute was also refunded the platform bears the part of a lost dispute that the refund had already taken from the seller (`platform_fees` then goes below zero; ADR 0003). Stripe's own processing fees, dispute fees, taxes and appeals are not modelled (SECURITY.md).
 - PostgreSQL 16.14 and Node 24.14.1 only. The CI workflows were written but have not been run on GitHub (they are modelled on the sibling repositories, whose workflows have).
 - Supabase and its connection pooler were not used in any test; `docs/adapting.md` says what to check.
 - Nine currencies are known; any other is refused. No conversion between currencies.
