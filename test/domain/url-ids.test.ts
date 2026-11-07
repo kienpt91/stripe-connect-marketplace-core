@@ -61,6 +61,11 @@ describe("identifiers", () => {
   it("parses Stripe ids by prefix and shape", () => {
     expect(parseStripeId("acct", "acct_1AbCdEfGh")).toBe("acct_1AbCdEfGh");
     expect(parseStripeId("ch", "ch_3NxYz12345678")).toBe("ch_3NxYz12345678");
+    expect(parseStripeId("cs", "cs_test_a1B2c3D4e5F6")).toBe("cs_test_a1B2c3D4e5F6");
+    expect(parseStripeId("cs", "cs_live_a1B2c3D4e5F6")).toBe("cs_live_a1B2c3D4e5F6");
+    expect(parseStripeId("cs", "cs_1SessionAaaa")).toBe("cs_1SessionAaaa");
+    expect(parseStripeId("ch", "ch_test_a1B2c3D4e5F6")).toBeUndefined();
+    expect(parseStripeId("cs", "cs_prod_a1B2c3D4e5F6")).toBeUndefined();
     for (const bad of ["acct_short", "ch_1AbCdEfGh", "acct_1AbC dEfGh", "acct_1AbCdEfGh'; DROP", "acct_", "", `acct_${"a".repeat(65)}`, 5, null]) expect(parseStripeId("acct", bad), String(bad)).toBeUndefined();
   });
 });

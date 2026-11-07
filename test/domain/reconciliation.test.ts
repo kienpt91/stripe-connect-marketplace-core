@@ -13,7 +13,7 @@ function agreeing(): { ledger: LedgerView; stripe: StripeView } {
   const ledger: LedgerView = {
     sellers: [{ sellerId: "s1", accountId: ACCT, state: "enabled", balances: { usd: 96 } }],
     payouts: [{ id: "po_1PayoutAaaaa", sellerId: "s1", accountId: ACCT, amount: 600, currency: "usd", status: "paid", createdAt: SINCE + 10 }],
-    payments: [{ chargeId: "ch_1ChargeAaaaa", sellerId: "s1", accountId: ACCT, amount: 1000, fee: 130, currency: "usd", refunded: 200, refundedFee: 26, createdAt: SINCE + 5, anomaly: null }],
+    payments: [{ chargeId: "ch_1ChargeAaaaa", sellerId: "s1", accountId: ACCT, amount: 1000, fee: 130, currency: "usd", refunded: 200, reversed: 200, reversedFee: 26, createdAt: SINCE + 5, anomaly: null }],
     transfers: [{ id: "tr_1TransferAaa", chargeId: "ch_1ChargeAaaaa", accountId: ACCT, amount: 870, amountReversed: 174 }],
     totals: [{ currency: "usd", debits: 5, credits: 5 }],
     flaggedEvents: [],

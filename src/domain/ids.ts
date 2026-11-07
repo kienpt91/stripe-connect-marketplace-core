@@ -23,13 +23,23 @@ export function asId<T extends string>(value: string): Brand<string, T> {
 }
 
 /**
- * The object ids Stripe hands out: a short prefix, an underscore and an alphanumeric body. Anything else is refused, so an id
- * that reaches a query, a posting key or a log line has a known shape.
+ * The object ids Stripe hands out: a short prefix, an underscore and an alphanumeric body (a Checkout Session id has one more
+ * underscore: `cs_test_...`). Anything else is refused, so an id that reaches a query, a posting key or a log line has a known shape.
  */
-const PREFIXES = ["acct", "ch", "re", "du", "po", "tr", "evt", "cs", "pi"] as const;
-export type StripePrefix = (typeof PREFIXES)[number];
+const ID_PATTERNS = {
+  acct: /^acct_[A-Za-z0-9]{8,64}$/,
+  ch: /^ch_[A-Za-z0-9]{8,64}$/,
+  re: /^re_[A-Za-z0-9]{8,64}$/,
+  du: /^du_[A-Za-z0-9]{8,64}$/,
+  po: /^po_[A-Za-z0-9]{8,64}$/,
+  tr: /^tr_[A-Za-z0-9]{8,64}$/,
+  evt: /^evt_[A-Za-z0-9]{8,64}$/,
+  pi: /^pi_[A-Za-z0-9]{8,64}$/,
+  cs: /^cs_(?:(?:test|live)_)?[A-Za-z0-9]{8,64}$/,
+} as const;
+export type StripePrefix = keyof typeof ID_PATTERNS;
 
 export function parseStripeId(prefix: StripePrefix, value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > 80) return undefined;
-  return new RegExp(`^${prefix}_[A-Za-z0-9]{8,64}$`).test(value) ? value : undefined;
+  return ID_PATTERNS[prefix].test(value) ? value : undefined;
 }

@@ -35,8 +35,9 @@ export interface LedgerPayment {
   readonly currency: Currency;
   /** refunds that succeeded and were posted */
   readonly refunded: number;
-  /** the part of those refunds that was the platform's fee: the rest was taken back from the seller */
-  readonly refundedFee: number;
+  /** everything taken back from the sale (refunds and lost disputes) and the platform's part of it: the rest was taken back from the seller */
+  readonly reversed: number;
+  readonly reversedFee: number;
   readonly createdAt: number;
   /** set at ingestion when the charge differed from the order it paid for */
   readonly anomaly: string | null;
@@ -228,8 +229,8 @@ function compareCharges(ledger: readonly LedgerPayment[], stripe: readonly Strip
 }
 
 /**
- * Every sale of a destination charge has a transfer to the seller of exactly the net amount; every refund takes the seller's part of
- * it back. A sale whose transfer has not been seen after `stuckAfterMs` is reported, and so is a transfer that says anything else.
+ * Every sale of a destination charge has a transfer to the seller of exactly the net amount; what is taken back from the sale (a refund,
+ * a lost dispute) takes the seller's part of the transfer back. A sale whose transfer has not been seen after `stuckAfterMs` is reported, and so is a transfer that says anything else.
  */
 function compareTransfers(ledger: LedgerView, options: CompareOptions, add: Add): void {
   const byCharge = new Map(ledger.transfers.map((t) => [t.chargeId, t]));
@@ -242,7 +243,8 @@ function compareTransfers(ledger: LedgerView, options: CompareOptions, add: Add)
     }
     if (t.accountId !== p.accountId) add("transfer_mismatch", "error", t.id, `the transfer went to ${t.accountId}, the order's seller is ${p.accountId}`);
     if (t.amount !== p.amount - p.fee) add("transfer_mismatch", "error", t.id, `transferred ${money(t.amount, p.currency)}, the net of the sale is ${money(p.amount - p.fee, p.currency)}`);
-    if (t.amountReversed !== p.refunded - p.refundedFee) add("transfer_mismatch", "warning", t.id, `reversed ${money(t.amountReversed, p.currency)}, the seller's part of the refunds is ${money(p.refunded - p.refundedFee, p.currency)}`);
+    const sellerPart = p.reversed - p.reversedFee;
+    if (t.amountReversed !== sellerPart) add("transfer_mismatch", "warning", t.id, `reversed ${money(t.amountReversed, p.currency)}, the seller's part of what was taken back from the sale is ${money(sellerPart, p.currency)}`);
   }
 }
 
