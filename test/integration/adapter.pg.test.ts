@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ingestEvent, retryDeferred } from "../../src/application/ingest.js";
 import { startCheckout } from "../../src/application/checkout.js";
@@ -7,7 +6,7 @@ import type { Database, Tx } from "../../src/application/store.js";
 import { payoutEntry, saleEntry } from "../../src/domain/ledger.js";
 import { PostgresDatabase } from "../../src/infrastructure/postgres/database.js";
 import { openPool } from "../support/connection-budget.js";
-import { asAdmin, createTestDatabase, describeDb, type TestDatabase } from "../support/pg.js";
+import { asAdmin, createTestDatabase, describeDb, waitFor, waitUntilBlockedOnLock, type TestDatabase } from "../support/pg.js";
 import { insertEntry, seedWorld, W } from "../support/seed.js";
 import { checkoutRequest, enabledSeller, makeWorld, sessionOf } from "../support/world.js";
 
@@ -79,7 +78,8 @@ describeDb("the PostgreSQL adapter", () => {
       order.push("other has its own lock");
     });
     await other;
-    await sleep(150);
+    // the second transaction is asked for in pg_locks: it is waiting for the first one's lock, and has not run
+    await waitUntilBlockedOnLock(database, "the second transaction to wait for the lock of the first");
     expect(order).toEqual(["first has the lock", "other has its own lock"]);
     firstHolds.resolve();
     await Promise.all([first, second]);
@@ -177,7 +177,7 @@ describeDb("the PostgreSQL adapter", () => {
       await expect(fragile.ping()).resolves.toBeUndefined();
       // an idle connection that is terminated must not crash the process: the pool reports the code
       await asAdmin(database, (c) => c.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'stripe-connect-marketplace-core' AND state = 'idle' AND pid <> pg_backend_pid()"));
-      await sleep(300);
+      await waitFor("the pool to report the connection that was terminated while idle", () => errors.length > reported);
       await expect(fragile.ping()).resolves.toBeUndefined();
       expect(errors.length).toBeGreaterThan(reported);
       expect(errors.every((c) => c === "57P01" || c === "unknown")).toBe(true);
@@ -262,9 +262,12 @@ describeDb("a refund and its charge arriving at the same moment", () => {
     const { db, reached, gate } = racing(true);
     const refundIn = ingestEvent({ ...w.deps, db }, refund);
     await reached.promise; // the refund holds the charge's lock and has found no payment
-    const chargeIn = ingestEvent(w.deps, charge);
-    const early = await Promise.race([chargeIn.then(() => "charge finished"), sleep(300).then(() => "charge is still waiting")]);
-    expect(early).toBe("charge is still waiting");
+    let chargeFinished = false;
+    const chargeIn = ingestEvent(w.deps, charge).finally(() => {
+      chargeFinished = true;
+    });
+    await waitUntilBlockedOnLock(database, "the charge to wait for the lock the refund holds");
+    expect(chargeFinished).toBe(false);
     gate.resolve();
     expect((await refundIn).status).toBe("deferred");
     expect((await chargeIn).status).toBe("applied");

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import pg from "pg";
 import { describe } from "vitest";
 import { migrate } from "../../src/infrastructure/postgres/migrate.js";
@@ -103,6 +104,28 @@ export async function asAdmin<T>(db: TestDatabase, fn: (client: pg.Client) => Pr
   } finally {
     await client.end();
   }
+}
+
+/**
+ * Polls until `probe` holds, for at most `timeoutMs`, and names what it was waiting for when it gives up. The race tests wait for an
+ * observable state (a session blocked on a lock, a pool that has seen a connection die) with this, instead of sleeping and hoping.
+ */
+export async function waitFor(what: string, probe: () => Promise<boolean> | boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (!(await probe())) {
+    if (performance.now() > deadline) throw new Error(`gave up after ${timeoutMs} ms waiting for ${what}`);
+    await sleep(20);
+  }
+}
+
+/** Waits until a session of the test database is waiting for an advisory lock (the kind `tx.lock` takes), as `pg_locks` shows it. */
+export function waitUntilBlockedOnLock(db: TestDatabase, what: string, timeoutMs = 10_000): Promise<void> {
+  return asAdmin(db, (client) =>
+    waitFor(what, async () => {
+      const waiting = await client.query("SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())");
+      return (waiting.rows[0]?.n ?? 0) > 0;
+    }, timeoutMs),
+  );
 }
 
 /** The SQLSTATE and message of the error a statement raises, or undefined when it succeeds. */
