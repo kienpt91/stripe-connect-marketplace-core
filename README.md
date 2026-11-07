@@ -4,7 +4,7 @@ A reference core for the payments backend of a two-sided marketplace on Stripe C
 
 1. **Events repeat, race and arrive out of order.** Webhooks are idempotent on the event id and applied exactly once; a refund that arrives before its charge waits for it; shuffled, duplicated and concurrent deliveries of the same history end in the same books, on both stores.
 2. **One seller sees or changes another seller's money.** Row level security with a role and an identity claim per transaction, and three locks on the door: the use case, the query and the database role.
-3. **The books are rewritten or do not balance.** An append-only double-entry ledger: no UPDATE, DELETE or TRUNCATE for anyone (the owner included), every entry checked for balance at COMMIT, every business fact booked once.
+3. **The books are rewritten or do not balance.** An append-only double-entry ledger: no UPDATE, DELETE or TRUNCATE for anyone (the database owner included), every entry checked for balance at COMMIT, every business fact booked once.
 4. **The commission or an amount is manipulated.** Integer minor units, a fee computed by the platform (the request has no field for it), half-up rounding, refunds split pro rata so that the parts add up exactly.
 5. **A forged request pretends to be Stripe.** HMAC over the raw bytes, checked before anything is parsed; replay and tampering are tested.
 
@@ -163,7 +163,7 @@ Also run: release script tests (29 checks), secret scan on the tree and the full
 
 - **Never run against Stripe.** No real account, no test-mode key, no Stripe CLI, no real webhook delivery. Event shapes, endpoints and parameters were written from Stripe's public API reference. `HttpStripeGateway` has only been run against a fake server on loopback; it creates Express accounts and Checkout Sessions with a destination and an application fee. Run a complete test-mode flow and `reconcile` before trusting any of it.
 - **The money rules are this repository's rules**, not Stripe's: how a refund splits the platform's fee from the seller's share, that a lost dispute is charged to the seller in the ledger while the platform pays at Stripe until an operator reverses the transfer, and that when a charge in dispute was also refunded the platform bears the part of a lost dispute that the refund had already taken from the seller (`platform_fees` then goes below zero; ADR 0003). Stripe's own processing fees, dispute fees, taxes and appeals are not modelled (SECURITY.md).
-- PostgreSQL 16.14 and Node 24.14.1 only. The CI workflows were written but have not been run on GitHub (they are modelled on the sibling repositories, whose workflows have).
+- PostgreSQL 16.14 and Node 24.14.1 only. The CI workflows in `.github/workflows/` have not been run on GitHub yet. The commands they call (the scripts in `scripts/` and the test commands above) were run locally in containers, which is where the numbers below come from; run the workflows once and read their logs before relying on them.
 - Supabase and its connection pooler were not used in any test; `docs/adapting.md` says what to check.
 - Nine currencies are known; any other is refused. No conversion between currencies. The fee policy is one for all of them and not currency-aware: `FEE_FIXED_MINOR=30` and `MIN_CHARGE_MINOR=100` are 0.30 and 1.00 in USD but 30 and 100 whole yen in JPY (`docs/adapting.md`; `test/contract/checkout.scenarios.ts` records it for JPY).
 - No load test; the lock per charge serialises one charge's events, not the system's.

@@ -35,4 +35,4 @@ Not wired, on purpose: it needs a long-lived secret and a decision about the nam
 
 ## Before the first real use
 
-The release workflow has not been run on GitHub yet (it is modelled on workflows that have). Run it once with `workflow_dispatch` and read the log before tagging anything.
+The release workflow has not been run on GitHub yet. Run it once with `workflow_dispatch` and read the log before tagging anything.
