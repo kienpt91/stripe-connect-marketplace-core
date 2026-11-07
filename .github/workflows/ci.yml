@@ -1,0 +1,102 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to full commit SHAs (checkout v7.0.1, setup-node v7.1.0).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      # The offline suite (no database): fails below the thresholds, domain 95, application 90, overall 85.
+      - run: npm run coverage
+      - run: npm run build
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+      # The service runs with PostgreSQL's default max_connections (100, 3 reserved): the Actions service options cannot add server
+      # arguments, so the suite fits the default instead (test/support/connection-budget.ts: one file at a time, bounded pools, and a
+      # monitor that fails the run when the server allows fewer connections than the budget or the measured peak exceeds it; the peak
+      # is printed in the log as "postgres connections: peak N of M usable").
+        # postgres 16.14 (image built 2026-08-05), pinned by digest. Trust auth is safe here: the service is only reachable from this runner.
+        image: postgres@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+          --tmpfs /var/lib/postgresql/data
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      # Every test, the PostgreSQL ones included (row level security, the append-only ledger, events delivered concurrently and in any order), with the same thresholds.
+      - run: npm run coverage
+        env:
+          MARKETPLACE_TEST_DATABASE_URL: postgres://postgres@127.0.0.1:5432/postgres
+      - run: npm run build
+      # The demonstration against the same throwaway service; it exits 1 when a claim does not hold.
+      - run: node dist/bin.js demo
+        env:
+          DEMO_ADMIN_URL: postgres://postgres@127.0.0.1:5432/postgres
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: sh scripts/secret-scan.sh --tree
+      - run: sh scripts/secret-scan.sh --history
+
+  dependency-age:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # every locked package must be at least seven days old
+      - run: node scripts/check-dep-age.mjs
+
+  release-scripts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sh scripts/test-release.sh

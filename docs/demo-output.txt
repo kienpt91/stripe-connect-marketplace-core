@@ -1,0 +1,74 @@
+stripe-connect-marketplace-core demo
+database: PostgreSQL 16.14 (Debian 16.14-1.pgdg13+1), a throwaway server with no network; Stripe: an in-process fake, nothing leaves this process
+
+1. a seller's onboarding follows the account at Stripe
+  registered Alba Ceramics            state new
+  checkout while new               refused: seller_not_enabled
+  account.updated, details missing -> requirements_due
+  details submitted, verifying     -> pending_review; checkout refused: seller_not_enabled
+  verified, charges and payouts on -> enabled
+  -> no checkout until the account is enabled; the state is read from Stripe, not from the event
+
+2. checkout: a destination charge with the platform's fee in integers of the minor unit
+  order of 49.99 USD: fee 5.30 USD (10 % of 49.99 is 4.999, rounded half up to 5.00, plus 0.30), seller gets 44.69 USD
+  the same idempotency key again   -> the same order, the same session: true
+  amounts 49.99, 4999.5, "4999", -4999, 99 -> invalid_amount, invalid_amount, invalid_amount, invalid_amount, amount_below_minimum
+  a request that names its own fee -> the fee is 10.30 USD anyway (the request has no such field)
+  -> the fee is the platform's, whole minor units, half up; a retried key is one order
+
+3. the webhook over HTTP on loopback: signature, replay, tampering, size
+  charge.succeeded, signed           -> HTTP 200 {"received":true,"status":"applied"}
+  the same event delivered again     -> HTTP 200 {"received":true,"status":"duplicate"}
+  signed with another secret         -> HTTP 401 {"error":"invalid_signature"}
+  body changed after signing         -> HTTP 401 {"error":"invalid_signature"}
+  signature from ten minutes ago     -> HTTP 401 {"error":"invalid_signature"}
+  no signature at all                -> HTTP 401 {"error":"invalid_signature"}
+  a 70 KB body                       -> HTTP 413 {"error":"payload_too_large"}
+  transfer.created, signed           -> HTTP 200 {"received":true,"status":"applied"}
+  ledger: 1 sale entry, Alba is owed 44.69 USD
+  -> a forged, altered, stale or missing signature never reaches the ledger; a replay is a no-op
+
+4. a sale, a refund and a dispute whose events arrive backwards, and some of them twice
+  charge.dispute.closed      deferred (waiting for ch_1Fake0000000013)
+  charge.dispute.created     deferred (waiting for ch_1Fake0000000013)
+  charge.dispute.created     duplicate
+  refund.created             deferred (waiting for ch_1Fake0000000013)
+  transfer.reversed          deferred (waiting for ch_1Fake0000000013)
+  transfer.created           deferred (waiting for ch_1Fake0000000013)
+  transfer.created           duplicate
+  charge.succeeded           applied
+  events still waiting for a charge: 0 (the 5 that were waiting were applied in the transaction that recorded the charge)
+  refund 30.00 USD of 120.00 USD: the platform gives back 3.07 USD of its 12.30 USD (floor of 307.5), the seller 26.93 USD
+  Alba's second sale is worth 80.77 USD to her in any order; the books say 80.77 USD
+  -> out of order and duplicated events end in the same books as in order (a refund before its charge waits for it)
+
+5. a refund after the seller was paid out
+  payout of 120.00 USD: Alba is owed 5.46 USD
+  refund of the rest (90.00 USD) requested: succeeded
+  Alba is owed -75.31 USD: she owes the platform 75.31 USD
+  WARNING negative_seller_balance    a1ba0000-0000-4000-8000-000000000001  the seller owes the platform 75.31 USD: a refund or a lost dispute exceeded what the seller was owed
+  -> the ledger records the debt, stays balanced, and reconciliation names it without calling it a mismatch
+
+6. the webhook endpoint was down: reconciliation finds what the ledger missed
+  ERROR   balance_mismatch           b2b00000-0000-4000-8000-000000000002  ledger owes the seller 224.70 USD, the Stripe balance of acct_1Fake0000000030 is 124.70 USD (available + pending)
+  ERROR   payout_missing_in_ledger   po_1Fake0000000038  Stripe paid out 100.00 USD (paid) from acct_1Fake0000000030; the ledger has no such payout
+  the 2 lost events are delivered: no errors left
+  -> a payout the ledger never heard of is an error with both numbers; delivering the events clears it
+
+7. sellers cannot see each other's money, and nobody can rewrite the ledger
+  Bruno asks the application for Alba's ledger     -> forbidden
+  Bruno's own ledger                               -> 2 lines, balance 124.70 USD
+  as Bruno's database role, asking by Alba's id    -> 0 ledger lines, 0 orders, seller row hidden: true
+  Bruno's role tries to change an order            -> permission denied for table orders
+  the database owner tries UPDATE: the ledger is append-only (UPDATE on ledger_lines)
+  the database owner tries DELETE: the ledger is append-only (DELETE on ledger_entries)
+  the database owner tries TRUNCATE: the ledger is append-only (TRUNCATE on ledger_lines)
+  an entry whose debits and credits differ         -> ledger entry payout:po_1Forged00001 does not balance: 2 lines for the 2 declared, debits 99999, credits 100000, total 100000
+  -> isolation holds at the application and at the database role; the ledger is append-only even for its owner, and unbalanced entries cannot commit
+
+8. the books
+  funds at Stripe 79.99 USD + disputed 0.00 USD  =  owed to sellers 49.39 USD + platform fees 30.60 USD
+  all debits 939.99 USD, all credits 939.99 USD
+  -> debits equal credits, and what Stripe holds is what the sellers are owed plus what the platform earned
+
+RESULT: every claim held (8 of 8).
